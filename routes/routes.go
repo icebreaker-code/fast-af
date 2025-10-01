@@ -14,4 +14,6 @@ func SetupRoutes(app *fiber.App) {
 
 	// user routes
 	api.Get("/users", controllers.GetUsers)
+	api.Get("/auth/google/login", controllers.GoogleLogin)
+	api.Get("/auth/google/callback", controllers.GoogleCallback)
 }
