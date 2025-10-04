@@ -160,3 +160,185 @@ func UserExists(userId primitive.ObjectID) (bool, error) {
 	}
 	return count > 0, nil
 }
+
+// Availablility model handling
+
+func SetAvailableNow(c *fiber.Ctx) error {
+	userID := c.Params("userId")
+	userObjectID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid user ID"})
+	}
+
+	// Check if user exists
+	exists, err := UserExists(userObjectID)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to check user existence"})
+	}
+	if !exists {
+		return c.Status(404).JSON(fiber.Map{"error": "User not found"})
+	}
+
+	avail := models.Availablility{
+		UserID:      userObjectID,
+		Date:        time.Now().Format("2006-01-02"),
+		StartTime:   time.Now().Format("15:04"),
+		EndTime:     "", // Open-ended for now
+		IsAvailable: true,
+		Location:    c.Query("location", ""),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.DefaultDBContextTimeout)*time.Second)
+	defer cancel()
+
+	_, err = database.DB.Collection("availabilities").InsertOne(ctx, avail)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to set availability"})
+	}
+	return c.Status(200).JSON(fiber.Map{"message": "User is now available"})
+}
+
+func UnsetAvailableNow(c *fiber.Ctx) error {
+	userID := c.Params("userId")
+	userObjectID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid user ID"})
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.DefaultDBContextTimeout)*time.Second)
+	defer cancel()
+
+	// Find the most recent 'available now' entry for this user and today
+	filter := bson.M{
+		"user_id":      userObjectID,
+		"is_available": true,
+		"date":         time.Now().Format("2006-01-02"),
+		"end_time":     "", // Only open-ended (currently available) entries
+	}
+	// Sort by start_time descending to get the latest
+	opts := options.FindOne().SetSort(bson.D{{"start_time", -1}})
+	var avail models.Availablility
+	err = database.DB.Collection("availabilities").FindOne(ctx, filter, opts).Decode(&avail)
+	if err != nil {
+		return c.Status(404).JSON(fiber.Map{"message": "No active availability found"})
+	}
+
+	update := bson.M{"$set": bson.M{"is_available": false, "end_time": time.Now().Format("15:04")}}
+	_, err = database.DB.Collection("availabilities").UpdateByID(ctx, avail.ID, update)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to unset availability"})
+	}
+	return c.Status(200).JSON(fiber.Map{"message": "User is no longer available"})
+}
+
+func UserAvailableNow(c *fiber.Ctx) error {
+	userID := c.Params("userId")
+	userObjectID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid user ID"})
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.DefaultDBContextTimeout)*time.Second)
+	defer cancel()
+
+	filter := bson.M{
+		"user_id":      userObjectID,
+		"is_available": true,
+		"date":         time.Now().Format("2006-01-02"),
+		"end_time":     "", // Only open-ended (currently available) entries
+	}
+	count, err := database.DB.Collection("availabilities").CountDocuments(ctx, filter)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to check availability"})
+	}
+	if count > 0 {
+		return c.Status(200).JSON(fiber.Map{"available": true})
+	}
+	return c.Status(200).JSON(fiber.Map{"available": false})
+}
+
+func SetFutureAvailability(c *fiber.Ctx) error {
+	userID := c.Params("userId")
+	userObjectID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid user ID"})
+	}
+
+	var avail models.Availablility
+	if err := c.BodyParser(&avail); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Cannot parse JSON"})
+	}
+	avail.UserID = userObjectID
+	avail.IsAvailable = true
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.DefaultDBContextTimeout)*time.Second)
+	defer cancel()
+
+	_, err = database.DB.Collection("availabilities").InsertOne(ctx, avail)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to set future availability"})
+	}
+	return c.Status(201).JSON(fiber.Map{"message": "Future availability set"})
+}
+
+func GetFutureAvailabilityForUser(c *fiber.Ctx) error {
+	userId := c.Params("userId")
+	userObjectID, err := primitive.ObjectIDFromHex(userId)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid user ID"})
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.DefaultDBContextTimeout)*time.Second)
+	defer cancel()
+
+	filter := bson.M{
+		"user_id":      userObjectID,
+		"is_available": true,
+		"end_time":     bson.M{"$ne": ""}, // Exclude 'available now' entries
+	}
+	cursor, err := database.DB.Collection("availabilities").Find(ctx, filter)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to fetch future availability"})
+	}
+	defer cursor.Close(ctx)
+
+	var availabilities []models.Availablility
+	for cursor.Next(ctx) {
+		var avail models.Availablility
+		cursor.Decode(&avail)
+		availabilities = append(availabilities, avail)
+	}
+
+	return c.Status(200).JSON(availabilities)
+}
+
+func CancelFutureAvailability(c *fiber.Ctx) error {
+	userID := c.Params("userId")
+	userObjectID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid user ID"})
+	}
+	var req struct {
+		Date      string `json:"date"`
+		StartTime string `json:"startTime"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Cannot parse JSON"})
+	}
+	if req.Date == "" || req.StartTime == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "date and startTime required"})
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.DefaultDBContextTimeout)*time.Second)
+	defer cancel()
+
+	filter := bson.M{"user_id": userObjectID, "date": req.Date, "start_time": req.StartTime, "is_available": true}
+	res, err := database.DB.Collection("availabilities").DeleteOne(ctx, filter)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to cancel future availability"})
+	}
+	if res.DeletedCount == 0 {
+		return c.Status(404).JSON(fiber.Map{"message": "No matching future availability found"})
+	}
+	return c.Status(200).JSON(fiber.Map{"message": "Future availability cancelled"})
+}

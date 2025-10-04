@@ -29,4 +29,13 @@ func SetupRoutes(app *fiber.App) {
 	api.Delete("/users/interests/:userId/:interestId", controllers.RemoveUserInterest)
 
 	api.Get("/interests/matches/:pattern", controllers.SearchInterests)
+
+	// availability routes
+	api.Get("/users/available-now/:userId", controllers.UserAvailableNow)
+	api.Post("/users/available-now/:userId", controllers.SetAvailableNow)
+	api.Post("/users/unset-available-now/:userId", controllers.UnsetAvailableNow)
+
+	api.Get("/users/future-availability/:userId", controllers.GetFutureAvailabilityForUser)
+	api.Post("/users/future-availability/:userId", controllers.SetFutureAvailability)
+	api.Delete("/users/future-availability/:userId/:id", controllers.CancelFutureAvailability)
 }

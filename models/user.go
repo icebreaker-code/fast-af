@@ -27,3 +27,13 @@ type UserInterest struct {
 	UserID     primitive.ObjectID `bson:"user_id" json:"userId"`
 	InterestID primitive.ObjectID `bson:"interest_id" json:"interestId"`
 }
+
+type Availablility struct {
+	ID          primitive.ObjectID `bson:"_id,omitempty" json:"id,omitempty"`
+	UserID      primitive.ObjectID `bson:"user_id" json:"userId"`
+	Date        string             `bson:"date" json:"date"` // in YYYY-MM-DD format
+	StartTime   string             `bson:"start_time" json:"startTime"`
+	EndTime     string             `bson:"end_time" json:"endTime"`
+	IsAvailable bool               `bson:"is_available" json:"isAvailable"`
+	Location    string             `bson:"location" json:"location"`
+}
