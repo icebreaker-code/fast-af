@@ -13,8 +13,8 @@ import (
 	"io/ioutil"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
@@ -57,26 +57,37 @@ func GoogleCallback(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.DefaultDBContextTimeout)*time.Second)
 	defer cancel()
 
-	filter := bson.M{"email": userInfo.Email}
-	update := bson.M{
-		"$set": bson.M{
-			"name":      userInfo.Name,
-			"email":     userInfo.Email,
-			"avatar":    userInfo.Picture,
-			"updatedAt": time.Now(),
-		},
-		"$setOnInsert": bson.M{
-			"id":        uuid.New(),
-			"createdAt": time.Now(),
-		},
+	// Check if user already exists
+	var existingUser models.User
+	err = database.DB.Collection("users").FindOne(
+		ctx,
+		bson.M{"email": userInfo.Email},
+		options.FindOne().SetProjection(bson.M{"_id": 0}),
+	).Decode(&existingUser)
+	if err == nil {
+		// User exists, do not update
+		return c.Status(200).SendString(fmt.Sprintf("Welcome back, %s!", existingUser.Name))
 	}
-	opts := options.Update().SetUpsert(true)
-	_, err = database.DB.Collection("users").UpdateOne(ctx, filter, update, opts)
-	if err != nil {
-		return c.Status(500).SendString("Failed to upsert user")
+	if err.Error() != "mongo: no documents in result" {
+		// Some other error
+		fmt.Println(err)
+		return c.Status(500).SendString("Failed to check user existence")
 	}
 
-	return c.SendString(fmt.Sprintf("Welcome, %s!", userInfo.Name))
+	// User does not exist, create new user
+	newUser := models.User{
+		Name:              userInfo.Name,
+		Email:             userInfo.Email,
+		ProfilePictureURL: userInfo.Picture,
+		CreatedAt:         time.Now(),
+		UpdatedAt:         time.Now(),
+	}
+	_, err = database.DB.Collection("users").InsertOne(ctx, newUser)
+	if err != nil {
+		return c.Status(500).SendString("Failed to create user")
+	}
+
+	return c.Status(201).SendString(fmt.Sprintf("Welcome, %s!", userInfo.Name))
 }
 
 func GetUsers(c *fiber.Ctx) error {
@@ -106,7 +117,6 @@ func CreateUser(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "Cannot parse JSON"})
 	}
 
-	user.ID = uuid.New()
 	user.CreatedAt = time.Now()
 	user.UpdatedAt = time.Now()
 
@@ -119,4 +129,34 @@ func CreateUser(c *fiber.Ctx) error {
 	}
 
 	return c.Status(201).JSON(user)
+}
+
+func GetUserByID(c *fiber.Ctx) error {
+	userID := c.Params("id")
+	userObjectID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid user ID"})
+	}
+
+	var user models.User
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.DefaultDBContextTimeout)*time.Second)
+	defer cancel()
+
+	err = database.DB.Collection("users").FindOne(ctx, bson.M{"_id": userObjectID}).Decode(&user)
+	if err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "User not found"})
+	}
+
+	return c.JSON(user)
+}
+
+func UserExists(userId primitive.ObjectID) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.DefaultDBContextTimeout)*time.Second)
+	defer cancel()
+	count, err := database.DB.Collection("users").CountDocuments(ctx, bson.M{"_id": userId})
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
