@@ -38,4 +38,11 @@ func SetupRoutes(app *fiber.App) {
 	api.Get("/users/future-availability/:userId", controllers.GetFutureAvailabilityForUser)
 	api.Post("/users/future-availability/:userId", controllers.SetFutureAvailability)
 	api.Delete("/users/future-availability/:userId/:id", controllers.CancelFutureAvailability)
+
+	// chat routes (WebSocket and REST fallback)
+	api.Get("/chat/ws/:userId", websocket.New(controllers.ChatWebSocket))
+	api.Post("/chat/window", controllers.CreateChatWindow)
+	api.Post("/chat/message", controllers.SendMessage)
+	api.Delete("/chat/message/:msgId", controllers.DeleteMessage)
+	api.Post("/chat/block", controllers.BlockChat)
 }

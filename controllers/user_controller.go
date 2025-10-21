@@ -131,6 +131,43 @@ func CreateUser(c *fiber.Ctx) error {
 	return c.Status(201).JSON(user)
 }
 
+func UpdateUserByID(c *fiber.Ctx) error {
+	userID := c.Params("userId")
+	userObjectID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid user ID"})
+	}
+	var updateData map[string]interface{}
+	if err := c.BodyParser(&updateData); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Cannot parse JSON"})
+	}
+
+	// Remove fields that should not be updated
+	delete(updateData, "_id")
+	delete(updateData, "createdAt")
+	updateData["updatedAt"] = time.Now()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.DefaultDBContextTimeout)*time.Second)
+	defer cancel()
+
+	update := bson.M{"$set": updateData}
+	res, err := database.DB.Collection("users").UpdateByID(ctx, userObjectID, update)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Error updating user"})
+	}
+	if res.MatchedCount == 0 {
+		return c.Status(404).JSON(fiber.Map{"error": "User not found"})
+	}
+
+	var updatedUser models.User
+	err = database.DB.Collection("users").FindOne(ctx, bson.M{"_id": userObjectID}).Decode(&updatedUser)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Error fetching updated user"})
+	}
+
+	return c.Status(200).JSON(updatedUser)
+}
+
 func GetUserByID(c *fiber.Ctx) error {
 	userID := c.Params("id")
 	userObjectID, err := primitive.ObjectIDFromHex(userID)
