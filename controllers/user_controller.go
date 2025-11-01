@@ -131,12 +131,14 @@ func CreateUser(c *fiber.Ctx) error {
 	return c.Status(201).JSON(user)
 }
 
+// PATCH /users/:userId - update user info
 func UpdateUserByID(c *fiber.Ctx) error {
 	userID := c.Params("userId")
 	userObjectID, err := primitive.ObjectIDFromHex(userID)
 	if err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "Invalid user ID"})
 	}
+
 	var updateData map[string]interface{}
 	if err := c.BodyParser(&updateData); err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "Cannot parse JSON"})
@@ -145,6 +147,7 @@ func UpdateUserByID(c *fiber.Ctx) error {
 	// Remove fields that should not be updated
 	delete(updateData, "_id")
 	delete(updateData, "createdAt")
+	delete(updateData, "email") // Do not allow email change
 	updateData["updatedAt"] = time.Now()
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.DefaultDBContextTimeout)*time.Second)
