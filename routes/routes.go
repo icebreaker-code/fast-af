@@ -4,6 +4,7 @@ import (
 	"fast-af/controllers"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/websocket/v2"
 )
 
 func SetupRoutes(app *fiber.App) {
@@ -40,9 +41,21 @@ func SetupRoutes(app *fiber.App) {
 	api.Delete("/users/future-availability/:userId/:id", controllers.CancelFutureAvailability)
 
 	// chat routes (WebSocket and REST fallback)
-	api.Get("/chat/ws/:userId", websocket.New(controllers.ChatWebSocket))
+	api.Get("/chat/ws/:userId", func(c *fiber.Ctx) error {
+		return websocket.New(func(conn *websocket.Conn) {
+			// Extract userId and chatWindowId from the request
+			userId := c.Params("userId")
+			chatWindowId := c.Query("chatWindowId")
+			// Call the logic from controllers.ChatWebSocket, but inline here
+			controllers.HandleChatWebSocket(conn, userId, chatWindowId)
+		})(c)
+	})
 	api.Post("/chat/window", controllers.CreateChatWindow)
 	api.Post("/chat/message", controllers.SendMessage)
 	api.Delete("/chat/message/:msgId", controllers.DeleteMessage)
 	api.Post("/chat/block", controllers.BlockChat)
+
+	// new chat window/message fetch APIs
+	api.Get("/chat/window/:userId", controllers.GetChatWindowsForUser)
+	api.Get("/chat/messages/:chatWindowId", controllers.GetMessagesForChatWindow)
 }
