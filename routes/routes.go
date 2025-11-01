@@ -42,11 +42,9 @@ func SetupRoutes(app *fiber.App) {
 
 	// chat routes (WebSocket and REST fallback)
 	api.Get("/chat/ws/:userId", func(c *fiber.Ctx) error {
+		userId := c.Params("userId")
+		chatWindowId := c.Query("chatWindowId")
 		return websocket.New(func(conn *websocket.Conn) {
-			// Extract userId and chatWindowId from the request
-			userId := c.Params("userId")
-			chatWindowId := c.Query("chatWindowId")
-			// Call the logic from controllers.ChatWebSocket, but inline here
 			controllers.HandleChatWebSocket(conn, userId, chatWindowId)
 		})(c)
 	})

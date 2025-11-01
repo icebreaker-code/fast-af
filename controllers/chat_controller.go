@@ -45,6 +45,10 @@ func HandleChatWebSocket(conn *websocket.Conn, userId string, chatWindowId strin
 	for {
 		mt, msg, err := conn.ReadMessage()
 		if err != nil {
+			// Suppress normal close error (code 1000)
+			if websocket.IsCloseError(err, websocket.CloseNormalClosure) {
+				break
+			}
 			log.Println("read error:", err)
 			break
 		}
