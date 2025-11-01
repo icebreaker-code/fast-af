@@ -9,13 +9,13 @@ Welcome to the Fast-AF project! This guide will help you set up your development
 ## Setup Instructions
 
 1. **Clone the repository**
-   ```sh
+```sh
 git clone https://github.com/icebreaker-code/fast-af.git
 cd fast-af
 ```
 
 2. **Install dependencies**
-   ```sh
+```sh
 go mod tidy
 ```
 
@@ -27,7 +27,7 @@ go mod tidy
    - Start your MongoDB server (default port: 27017).
 
 5. **Start the application**
-   ```sh
+```sh
 go run cmd/main.go
 ```
 
@@ -42,16 +42,6 @@ go run cmd/main.go
 - `database/` - Database connection logic
 - `models/` - Data models
 - `routes/` - API route definitions
-
-## Useful Commands
-- Run tests:
-  ```sh
-go test ./...
-```
-- Build the project:
-  ```sh
-go build -o fast-af cmd/main.go
-```
 
 ## Contributing
 Feel free to open issues or submit pull requests. For major changes, please open an issue first to discuss what you would like to change.
