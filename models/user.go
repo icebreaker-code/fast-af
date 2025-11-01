@@ -37,3 +37,15 @@ type Availablility struct {
 	IsAvailable bool               `bson:"is_available" json:"isAvailable"`
 	Location    string             `bson:"location" json:"location"`
 }
+
+// MeetingRequest represents a request from one user to meet another during their future availability
+type MeetingRequest struct {
+	ID             primitive.ObjectID `bson:"_id,omitempty" json:"id,omitempty"`
+	RequesterID    primitive.ObjectID `bson:"requester_id" json:"requesterId"`
+	TargetUserID   primitive.ObjectID `bson:"target_user_id" json:"targetUserId"`
+	AvailabilityID primitive.ObjectID `bson:"availability_id" json:"availabilityId"`
+	Message        string             `bson:"message" json:"message"`
+	Status         string             `bson:"status" json:"status"` // pending, accepted, rejected
+	CreatedAt      time.Time          `bson:"created_at" json:"createdAt"`
+	UpdatedAt      time.Time          `bson:"updated_at" json:"updatedAt"`
+}

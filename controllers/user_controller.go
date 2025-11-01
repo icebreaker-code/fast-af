@@ -382,3 +382,174 @@ func CancelFutureAvailability(c *fiber.Ctx) error {
 	}
 	return c.Status(200).JSON(fiber.Map{"message": "Future availability cancelled"})
 }
+
+// POST /users/:targetUserId/meeting-requests
+func CreateMeetingRequest(c *fiber.Ctx) error {
+	targetUserId := c.Params("targetUserId")
+	targetObjectID, err := primitive.ObjectIDFromHex(targetUserId)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid target user ID"})
+	}
+
+	var req struct {
+		AvailabilityID string `json:"availabilityId"`
+		Message        string `json:"message"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Cannot parse JSON"})
+	}
+	availabilityObjectID, err := primitive.ObjectIDFromHex(req.AvailabilityID)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid availability ID"})
+	}
+
+	// For demo, requesterId from query param (in real app, from auth context)
+	requesterId := c.Query("requesterId")
+	requesterObjectID, err := primitive.ObjectIDFromHex(requesterId)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid requester ID"})
+	}
+
+	meetingReq := models.MeetingRequest{
+		RequesterID:    requesterObjectID,
+		TargetUserID:   targetObjectID,
+		AvailabilityID: availabilityObjectID,
+		Message:        req.Message,
+		Status:         "pending",
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.DefaultDBContextTimeout)*time.Second)
+	defer cancel()
+
+	res, err := database.DB.Collection("meeting_requests").InsertOne(ctx, meetingReq)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to create meeting request"})
+	}
+	meetingReq.ID = res.InsertedID.(primitive.ObjectID)
+	return c.Status(201).JSON(meetingReq)
+}
+
+// GET /users/:userId/meeting-requests (for target user)
+func GetMeetingRequestsForUser(c *fiber.Ctx) error {
+	userId := c.Params("userId")
+	userObjectID, err := primitive.ObjectIDFromHex(userId)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid user ID"})
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.DefaultDBContextTimeout)*time.Second)
+	defer cancel()
+
+	filter := bson.M{"target_user_id": userObjectID}
+	cursor, err := database.DB.Collection("meeting_requests").Find(ctx, filter)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to fetch meeting requests"})
+	}
+	defer cursor.Close(ctx)
+
+	var requests []models.MeetingRequest
+	for cursor.Next(ctx) {
+		var req models.MeetingRequest
+		cursor.Decode(&req)
+		requests = append(requests, req)
+	}
+	return c.Status(200).JSON(requests)
+}
+
+// PATCH /meeting-requests/:id (accept/reject)
+func UpdateMeetingRequestStatus(c *fiber.Ctx) error {
+	reqId := c.Params("id")
+	reqObjectID, err := primitive.ObjectIDFromHex(reqId)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid meeting request ID"})
+	}
+
+	var body struct {
+		Status string `json:"status"` // accepted or rejected
+	}
+	if err := c.BodyParser(&body); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Cannot parse JSON"})
+	}
+	if body.Status != "accepted" && body.Status != "rejected" {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid status"})
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.DefaultDBContextTimeout)*time.Second)
+	defer cancel()
+
+	update := bson.M{"$set": bson.M{"status": body.Status, "updated_at": time.Now()}}
+	res, err := database.DB.Collection("meeting_requests").UpdateByID(ctx, reqObjectID, update)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to update meeting request status"})
+	}
+	if res.MatchedCount == 0 {
+		return c.Status(404).JSON(fiber.Map{"error": "Meeting request not found"})
+	}
+
+	var updatedReq models.MeetingRequest
+	err = database.DB.Collection("meeting_requests").FindOne(ctx, bson.M{"_id": reqObjectID}).Decode(&updatedReq)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to fetch updated meeting request"})
+	}
+	return c.Status(200).JSON(updatedReq)
+}
+
+// DELETE /meeting-requests/:id (cancel by requester)
+func CancelMeetingRequest(c *fiber.Ctx) error {
+	reqId := c.Params("id")
+	reqObjectID, err := primitive.ObjectIDFromHex(reqId)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid meeting request ID"})
+	}
+
+	// For demo, requesterId from query param (in real app, from auth context)
+	requesterId := c.Query("requesterId")
+	requesterObjectID, err := primitive.ObjectIDFromHex(requesterId)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid requester ID"})
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.DefaultDBContextTimeout)*time.Second)
+	defer cancel()
+
+	// Only allow update if requester matches
+	filter := bson.M{"_id": reqObjectID, "requester_id": requesterObjectID}
+	update := bson.M{"$set": bson.M{"status": "deleted", "updated_at": time.Now()}}
+	res, err := database.DB.Collection("meeting_requests").UpdateOne(ctx, filter, update)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to cancel meeting request"})
+	}
+	if res.MatchedCount == 0 {
+		return c.Status(404).JSON(fiber.Map{"error": "Meeting request not found or not owned by requester"})
+	}
+	return c.Status(200).JSON(fiber.Map{"message": "Meeting request marked as deleted"})
+}
+
+// GET /users/:userId/sent-meeting-requests
+func GetSentMeetingRequestsForUser(c *fiber.Ctx) error {
+	userId := c.Params("userId")
+	userObjectID, err := primitive.ObjectIDFromHex(userId)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid user ID"})
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.DefaultDBContextTimeout)*time.Second)
+	defer cancel()
+
+	filter := bson.M{"requester_id": userObjectID}
+	cursor, err := database.DB.Collection("meeting_requests").Find(ctx, filter)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to fetch sent meeting requests"})
+	}
+	defer cursor.Close(ctx)
+
+	var requests []models.MeetingRequest
+	for cursor.Next(ctx) {
+		var req models.MeetingRequest
+		cursor.Decode(&req)
+		requests = append(requests, req)
+	}
+	return c.Status(200).JSON(requests)
+}

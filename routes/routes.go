@@ -41,6 +41,14 @@ func SetupRoutes(app *fiber.App) {
 	api.Post("/users/future-availability/:userId", controllers.SetFutureAvailability)
 	api.Delete("/users/future-availability/:userId/:id", controllers.CancelFutureAvailability)
 
+	// meeting request routes
+	api.Post("/users/:targetUserId/meeting-requests", controllers.CreateMeetingRequest)
+	api.Get("/users/:userId/meeting-requests", controllers.GetMeetingRequestsForUser)
+	api.Get("/users/:userId/sent-meeting-requests", controllers.GetSentMeetingRequestsForUser)
+	api.Patch("/meeting-requests/:id", controllers.UpdateMeetingRequestStatus)
+	// only the requester can cancel a meeting request
+	api.Delete("/meeting-requests/:id", controllers.CancelMeetingRequest)
+
 	// chat routes (WebSocket and REST fallback)
 	api.Get("/chat/ws/:userId", func(c *fiber.Ctx) error {
 		userId := c.Params("userId")
