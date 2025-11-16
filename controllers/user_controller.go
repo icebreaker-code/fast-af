@@ -231,11 +231,15 @@ func SetAvailableNow(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.DefaultDBContextTimeout)*time.Second)
 	defer cancel()
 
-	_, err = database.DB.Collection("availabilities").InsertOne(ctx, avail)
+	res, err := database.DB.Collection("availabilities").InsertOne(ctx, avail)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "Failed to set availability"})
 	}
-	return c.Status(200).JSON(fiber.Map{"message": "User is now available"})
+	// set the inserted ID back on the model if possible
+	if oid, ok := res.InsertedID.(primitive.ObjectID); ok {
+		avail.ID = oid
+	}
+	return c.Status(201).JSON(fiber.Map{"message": "User is now available", "availabilityId": avail.ID.Hex()})
 }
 
 func UnsetAvailableNow(c *fiber.Ctx) error {

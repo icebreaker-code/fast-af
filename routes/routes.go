@@ -37,6 +37,13 @@ func SetupRoutes(app *fiber.App) {
 	api.Post("/users/available-now/:userId", controllers.SetAvailableNow)
 	api.Post("/users/unset-available-now/:userId", controllers.UnsetAvailableNow)
 
+	// proximity routes
+	api.Post("/users/proximity/:userId", controllers.SetProximityAvailability)
+	api.Post("/users/proximity/off/:userId", controllers.ToggleProximityOff)
+	api.Patch("/users/proximity/:userId", controllers.UpdateProximityLocation)
+	api.Get("/proximities/active", controllers.GetAllActiveProximities)
+	api.Get("/users/proximity/nearby/:userId", controllers.GetNearbyUsers)
+
 	api.Get("/users/future-availability/:userId", controllers.GetFutureAvailabilityForUser)
 	api.Post("/users/future-availability/:userId", controllers.SetFutureAvailability)
 	api.Delete("/users/future-availability/:userId/:id", controllers.CancelFutureAvailability)
