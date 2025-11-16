@@ -16,6 +16,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
@@ -653,4 +654,63 @@ func GetSentMeetingRequestsForUser(c *fiber.Ctx) error {
 		requests = append(requests, req)
 	}
 	return c.Status(200).JSON(requests)
+}
+
+// POST /users/:userId/rate
+// Accepts JSON { "rating": <float> } where rating is typically 0-5
+// Atomically increments users_rated and updates trust_score as the new weighted average
+func RateUser(c *fiber.Ctx) error {
+	userID := c.Params("userId")
+	userObjectID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Invalid user ID"})
+	}
+
+	var body struct {
+		Rating float64 `json:"rating"`
+	}
+	if err := c.BodyParser(&body); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "Cannot parse JSON"})
+	}
+	if body.Rating < 0 || body.Rating > 5 {
+		return c.Status(400).JSON(fiber.Map{"error": "Rating must be between 0 and 5"})
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.DefaultDBContextTimeout)*time.Second)
+	defer cancel()
+
+	// Use an update pipeline so the calculation happens server-side and is atomic
+	// Handle missing fields by treating them as 0 via $ifNull to avoid null propagation
+	usersRatedCurrent := bson.M{"$ifNull": bson.A{"$users_rated", 0}}
+	trustScoreCurrent := bson.M{"$ifNull": bson.A{"$trust_score", 0}}
+	newUsersRated := bson.M{"$add": bson.A{usersRatedCurrent, 1}}
+	numerator := bson.M{"$add": bson.A{
+		bson.M{"$multiply": bson.A{trustScoreCurrent, usersRatedCurrent}},
+		body.Rating,
+	}}
+	trustScoreNew := bson.M{"$divide": bson.A{numerator, newUsersRated}}
+
+	updatePipeline := bson.A{
+		bson.M{"$set": bson.M{
+			"users_rated": newUsersRated,
+			"trust_score": trustScoreNew,
+			"updated_at":  time.Now(),
+		}},
+	}
+
+	opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
+	res := database.DB.Collection("users").FindOneAndUpdate(ctx, bson.M{"_id": userObjectID}, updatePipeline, opts)
+	if res.Err() != nil {
+		if res.Err() == mongo.ErrNoDocuments {
+			return c.Status(404).JSON(fiber.Map{"error": "User not found"})
+		}
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to update user trust score"})
+	}
+
+	var updatedUser models.User
+	if err := res.Decode(&updatedUser); err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to decode updated user"})
+	}
+
+	return c.Status(200).JSON(updatedUser)
 }

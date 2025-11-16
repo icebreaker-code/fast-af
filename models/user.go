@@ -17,6 +17,7 @@ type User struct {
 	ProfilePictureURL string             `bson:"profile_picture_url" json:"profilePictureUrl"`
 	Bio               string             `bson:"bio" json:"bio"`
 	TrustScore        float64            `bson:"trust_score" json:"trustScore"`
+	UsersRated        int                `bson:"users_rated" json:"usersRated"`
 	Verified          bool               `bson:"verified" json:"verified"`
 	CreatedAt         time.Time          `bson:"created_at" json:"createdAt"`
 	UpdatedAt         time.Time          `bson:"updated_at" json:"updatedAt"`
