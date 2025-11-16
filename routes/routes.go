@@ -56,6 +56,10 @@ func SetupRoutes(app *fiber.App) {
 	// only the requester can cancel a meeting request
 	api.Delete("/meeting-requests/:id", controllers.CancelMeetingRequest)
 
+	// users matching interests
+	api.Get("/users-match-interests", controllers.GetUsersByInterests)
+	api.Get("/users-match-interests/:userId", controllers.GetUsersByInterests)
+
 	// chat routes (WebSocket and REST fallback)
 	api.Get("/chat/ws/:userId", func(c *fiber.Ctx) error {
 		userId := c.Params("userId")

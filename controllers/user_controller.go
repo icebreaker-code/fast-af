@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 	"go.mongodb.org/mongo-driver/bson"
@@ -189,6 +190,102 @@ func GetUserByID(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(user)
+}
+
+// GetUsersByInterests returns users who have any of the provided interest IDs
+// Usage examples:
+//  - GET /api/v1/users/match-interests?interestIds=<hex>,<hex>
+//  - GET /api/v1/users/match-interests/:userId  (find matches for a specific user)
+func GetUsersByInterests(c *fiber.Ctx) error {
+	// allow either query param interestIds (comma separated) or path param userId
+	interestIdsParam := c.Query("interestIds", "")
+	routeUserId := c.Params("userId", "")
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(config.DefaultDBContextTimeout)*time.Second)
+	defer cancel()
+
+	var interestObjectIDs []primitive.ObjectID
+
+	if interestIdsParam != "" {
+		parts := strings.Split(interestIdsParam, ",")
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			oid, err := primitive.ObjectIDFromHex(p)
+			if err != nil {
+				return c.Status(400).JSON(fiber.Map{"error": "Invalid interest ID: " + p})
+			}
+			interestObjectIDs = append(interestObjectIDs, oid)
+		}
+	} else if routeUserId != "" {
+		// fetch interests for this user
+		uid, err := primitive.ObjectIDFromHex(routeUserId)
+		if err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "Invalid user ID"})
+		}
+		cursor, err := database.DB.Collection("user_interests").Find(ctx, bson.M{"user_id": uid})
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "Failed to fetch user interests"})
+		}
+		defer cursor.Close(ctx)
+		for cursor.Next(ctx) {
+			var ui models.UserInterest
+			cursor.Decode(&ui)
+			interestObjectIDs = append(interestObjectIDs, ui.InterestID)
+		}
+	} else {
+		return c.Status(400).JSON(fiber.Map{"error": "Provide interestIds query param or userId path param"})
+	}
+
+	if len(interestObjectIDs) == 0 {
+		// nothing to match
+		return c.Status(200).JSON([]models.User{})
+	}
+
+	// find user_ids from user_interests that match any of the interest ids
+	uiCursor, err := database.DB.Collection("user_interests").Find(ctx, bson.M{"interest_id": bson.M{"$in": interestObjectIDs}})
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to query user interests"})
+	}
+	defer uiCursor.Close(ctx)
+
+	userIDMap := make(map[string]primitive.ObjectID)
+	for uiCursor.Next(ctx) {
+		var ui models.UserInterest
+		uiCursor.Decode(&ui)
+		// optionally exclude the route user itself
+		if routeUserId != "" && ui.UserID.Hex() == routeUserId {
+			continue
+		}
+		userIDMap[ui.UserID.Hex()] = ui.UserID
+	}
+
+	if len(userIDMap) == 0 {
+		return c.Status(200).JSON([]models.User{})
+	}
+
+	var userIDs []primitive.ObjectID
+	for _, id := range userIDMap {
+		userIDs = append(userIDs, id)
+	}
+
+	// fetch user documents
+	uCursor, err := database.DB.Collection("users").Find(ctx, bson.M{"_id": bson.M{"$in": userIDs}})
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "Failed to fetch users"})
+	}
+	defer uCursor.Close(ctx)
+
+	var users []models.User
+	for uCursor.Next(ctx) {
+		var u models.User
+		uCursor.Decode(&u)
+		users = append(users, u)
+	}
+
+	return c.Status(200).JSON(users)
 }
 
 func UserExists(userId primitive.ObjectID) (bool, error) {
